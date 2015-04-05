@@ -1,0 +1,5 @@
+snpID	S1	S2	S3
+rs1	GG	GG	GT
+rs2	AA	AT	TT
+rs3	TT	TT	TT
+rs4	AT	AT	TT

@@ -1,0 +1,22 @@
+#!/bin/bash
+
+#Loop through all files
+#For each file, make a folder, move the file into the folder
+#run AutoFACT on it.
+cd ..
+for file in *; do
+	if [ -d $file ] && [ $file != "scripts" ]; then #if it's a folder 
+							#and it's not scripts
+		echo $file
+		cd $file
+		pwd
+		echo $!
+        	set pid = $!
+        	wait $pid
+		AutoFACT.pl -f $file.orfs -a -g
+		echo $!
+		set pid = $!
+		wait $pid
+		cd ..
+	fi
+done

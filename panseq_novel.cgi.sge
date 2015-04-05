@@ -1,0 +1,68 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use diagnostics;
+use webDisplay;
+use Schedule::DRMAAc qw/ :all /;
+
+my $homePage = webDisplay->new();
+$homePage->loadNcbiStrains('/home/claing/public_html/isage/NCBI/NCBI.txt');
+$homePage->webpageInit();
+$homePage->novelFinder();
+
+my $error; #drmaa error code
+my $diagnosis; #drmaa error diagnosis
+
+#run system call in background using fork/exec
+if($homePage->toProceed() eq 'yes'){
+	$homePage->processFileUploads(); #upload files before forking
+	
+	my $pid = fork();
+	if(!defined $pid){die "cannot fork process!\n $!"};
+	
+	if($pid){
+		#display alldone!
+		
+		$homePage->allDone('true');
+		$homePage->displayFinishedResults();
+		exit(0);
+	}
+	else{
+		#need to close open filehandles for Apache to release
+		close STDERR;
+		close STDIN;
+		close STDOUT;
+
+		my $jt;
+		my $jobid;
+
+		#my $systemLine = 'perl /home/claing/public_html/panseq/panseq.pl' . $homePage->paramsForCommandLine() . ' --user-params novelOrCore=novel' . ' > ' . $homePage->baseDirectory . 'log.txt';
+                #system("$systemLine");
+
+		#my @args = ($homePage->paramsForCommandLine()," --user-params novelOrCore=novel > ",$homePage->baseDirectory,"log.txt");
+
+		( $error, $diagnosis ) = drmaa_init( undef );
+		die drmaa_strerror( $error ) . "\n" . $diagnosis if $error;
+
+		( $error, $jt, $diagnosis ) = drmaa_allocate_job_template();
+		die drmaa_strerror( $error ) . "\n" . $diagnosis if $error;
+
+		( $error, $diagnosis ) = drmaa_set_attribute( $jt, $DRMAA_REMOTE_COMMAND, '/home/claing/public_html/panseq/panseq.pl' );
+		die drmaa_strerror( $error ) . "\n" . $diagnosis if $error;
+
+		( $error, $diagnosis ) = drmaa_set_vector_attribute( $jt, $DRMAA_V_ARGV, [ $homePage->paramsForCommandLine(), " --user-params novelOrCore=novel",  " > ", $homePage->baseDirectory, "log.txt", " &" ] ); 
+		die drmaa_strerror( $error ) . "\n" . $diagnosis if $error;
+
+		( $error, $jobid, $diagnosis ) = drmaa_run_job( $jt );
+		die drmaa_strerror( $error ) . "\n" . $diagnosis if $error;
+
+		my @job_constant = ( $DRMAA_JOB_IDS_SESSION_ALL );
+		( $error, $diagnosis ) = drmaa_synchronize( \@job_constant , $DRMAA_TIMEOUT_WAIT_FOREVER, 0 );
+		die drmaa_strerror( $error ) . "\n" . $diagnosis if $error;
+
+		( $error, $diagnosis ) = drmaa_delete_job_template( $jt );
+		die drmaa_strerror( $error ) . "\n" . $diagnosis if $error;
+
+		exit(0);
+	}
+}

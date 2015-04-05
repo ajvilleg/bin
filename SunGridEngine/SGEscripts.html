@@ -1,0 +1,826 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+<meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+
+
+  <title>SGE scripts</title>
+</head><body>
+<big><big><span style="font-family: Times New Roman,Times,serif;"><small>Here
+are a set of scripts I wrote to manage jobs on a Sun Grid Engine
+cluster. They allow one-line job submission, including looping of
+repetitive jobs. They also allow a user to set up her or his own queue
+on top of the SGE queue to limit the number of jobs submitted at one
+time (requires running a perl script on a node that can qalter jobs).
+All scripts are released under the GNU Public License V. 2.<br>
+<br>
+<a style="font-weight: bold;" href="#ezsub">ezsub</a>: submit one job
+at a time: "ezsub program datafile"<br>
+<a style="font-weight: bold;" href="#ezloop">ezloop</a>: submit
+multiple repetitive jobs: "ezsub number_of_reps program datafile". Note
+that any instance of "REP" [all caps] in the datafile will be replaced
+by the replicate number: "log file=runREP.log" is changed to "log
+file=run3.log" on the third replicate.<br>
+<a style="font-weight: bold;" href="#ezdel">ezdel</a>: delete all
+queued and held jobs<br>
+<a style="font-weight: bold;" href="#nicesub">nicesub</a>, <a style="font-weight: bold;" href="#niceloop">niceloop</a>: same as
+ezsub and ezloop, but starts jobs with user holds on them. Nicestart
+then removes the user holds<br>
+<a style="font-weight: bold;" href="#nicestart">nicestart</a>: converts
+held jobs to running jobs: "nicestart minnum maxnum freenodes". Minnum
+(maxnum) specifies the minimum (maximum) number of jobs to be actively
+queued or run regardless of cluster activity. Freenodes specifies the
+number of nodes to remain free: jobs will be submitted until there are
+no more than freenodes still free (currently written for an 88 node
+cluster) or until maxnum is hit.<br>
+<a style="font-weight: bold;" href="#nicewatch">nicewatch</a>: a script
+launched by nicestart<br>
+<a style="font-weight: bold;" href="#niceqstat">niceqstat</a>: greps
+qstat output to strip user-held jobs <br>
+<a style="font-weight: bold;" href="#nicecount">nicecount</a>: uses
+qstat to count the number of running jobs of various types</small><br>
+<br>
+</span></big></big><big><big><span style="font-family: Times New Roman,Times,serif;"><br>
+<a name="ezsub"></a>ezsub<br>
+</span></big></big>
+<div style="margin-left: 40px;"><span style="color: rgb(105, 105, 105);">#!
+</span><span style="color: rgb(0, 121, 151);">/bin/bash</span><br>
+<span style="color: rgb(105, 105, 105);"># Shell script to
+automatically create a simple shell script</span><br>
+<span style="color: rgb(105, 105, 105);"># and submit it to sge using
+qsub. To use this, just type</span><br>
+<span style="color: rgb(105, 105, 105);"># ezsub followed by the name
+and options for your job. I.e.,</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># ezsub paup -n batchfile.nex</span><br>
+<span style="color: rgb(105, 105, 105);"># ezsub ./configure
+--disable-shared</span><br>
+<span style="color: rgb(105, 105, 105);"># ezsub mb adh.nex</span><br>
+<span style="color: rgb(105, 105, 105);"># ezsub tar -xvf gsl-1.8.tar</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># The one constraint is that
+you can't have pipes or redirects ( &gt;, &lt;, |), as</span><br>
+<span style="color: rgb(105, 105, 105);"># they would use the output of
+the ezsub command (which is just your job number)</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># instead of the output of
+whatever program you're calling</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># Brian O'Meara 17 Nov 2006</span><br>
+<span style="color: rgb(105, 105, 105);"># </span><span style="color: rgb(85, 85, 221);">http://www.brianomeara.info</span><br>
+<span style="color: rgb(105, 105, 105);"># Released under GPL v2 </span><br>
+<br>
+echo <span style="color: rgb(0, 0, 230);">"#!/bin/bash"</span> <span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh<br>
+echo <span style="color: rgb(0, 0, 230);">"#$ -cwd"</span> <span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#use current directory as working
+directory</span><br>
+<br>
+<br>
+<span style="color: rgb(105, 105, 105);">########### Change email
+settings #################</span><br>
+echo <span style="color: rgb(0, 0, 230);">"#$ -M </span><span style="color: rgb(113, 68, 196);">me@mycollege.edu</span><span style="color: rgb(0, 0, 230);">"</span> <span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#use your own email address. Please.</span><br>
+echo <span style="color: rgb(0, 0, 230);">"#$ -m as"</span> <span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#send email about the job. </span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># "b"=when job begins</span><br>
+<span style="color: rgb(105, 105, 105);"># "e"=when job ends</span><br>
+<span style="color: rgb(105, 105, 105);"># "a"=when job aborts</span><br>
+<span style="color: rgb(105, 105, 105);"># "s"=when job suspended
+(someone kicks you off)</span><br>
+<span style="color: rgb(105, 105, 105);"># "n" alone means don't send
+mail</span><br>
+<span style="color: rgb(105, 105, 105);">##################################################</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);">##################### Job name
+############################</span><br>
+echo <span style="color: rgb(0, 0, 230);">"#$ -N EZsub"</span> <span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#job name, currently EZsub</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);">###########################################################</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);">########### Don't modify this
+bit #################</span><br>
+echo <span style="color: rgb(0, 0, 230);">"#$ -r y"</span><span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#makes job rerunable #</span><br>
+echo <span style="color: rgb(0, 0, 230);">"#$ -S /bin/bash"</span><span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#</span><br>
+<br>
+echo <span style="color: rgb(0, 0, 230);">""</span><span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">until</span> <span style="color: rgb(128, 128, 48);">[</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">-z</span> <span style="color: rgb(0, 0, 230);">"</span><span style="color: rgb(121, 121, 151);">$1</span><span style="color: rgb(0, 0, 230);">"</span> <span style="color: rgb(128, 128, 48);">]</span> <span style="color: rgb(105, 105, 105);">#</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">do</span> <span style="color: rgb(105, 105, 105);">#</span><br>
+echo <span style="color: rgb(128, 128, 48);">-</span>n <span style="color: rgb(0, 0, 230);">"</span><span style="color: rgb(121, 121, 151);">$1</span><span style="color: rgb(0, 0, 230);"> "</span> <span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span> temporaryqrunstrings <span style="color: rgb(105, 105, 105);">#</span><br>
+<br>
+<span style="color: rgb(64, 0, 0);">shift</span> <span style="color: rgb(105, 105, 105);">#</span><br>
+done <span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">tr </span><span style="color: rgb(128, 0, 0);">'</span><span style="color: rgb(15, 105, 255);">\n</span><span style="color: rgb(128, 0, 0);">'</span><span style="color: rgb(0, 0, 230);"> </span><span style="color: rgb(128, 0, 0);">'</span> <span style="color: rgb(0, 0, 230);">' &lt; temporaryqrunstrings &gt;&gt;
+tempqrun.sh #</span><br>
+<br>
+<span style="color: rgb(0, 0, 230);">###################################################</span><span style="color: rgb(0, 0, 230);"></span><br>
+<span style="color: rgb(0, 0, 230);">############ Cleanup
+#########################</span><br>
+<span style="color: rgb(0, 0, 230);">#delete the "#" at the beginning
+of the following line if you want to remove the output files</span><br>
+<span style="color: rgb(0, 0, 230);">#echo "rm EZsub.*" &gt;&gt;
+tempqrun.sh </span><br>
+<span style="color: rgb(0, 0, 230);">#############################################</span><span style="color: rgb(0, 0, 230);"></span><br>
+<span style="color: rgb(0, 0, 230);">###### Don'</span>t modify this
+bit <span style="color: rgb(105, 105, 105);">###########</span><br>
+<span style="color: rgb(64, 0, 0);">sleep</span> <span style="color: rgb(0, 140, 0);">1</span> <span style="color: rgb(105, 105, 105);">#</span><br>
+<br>
+<span style="color: rgb(64, 0, 0);">chmod</span> <span style="color: rgb(0, 140, 0);">777</span> tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#</span><br>
+cp tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh tempqrun2<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#</span><br>
+qsub tempqrun2<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#</span><br>
+<br>
+<span style="color: rgb(64, 0, 0);">sleep</span> <span style="color: rgb(0, 140, 0);">1</span> <span style="color: rgb(105, 105, 105);">#</span><br>
+rm temporaryqrunstrings <span style="color: rgb(105, 105, 105);">#</span><br>
+rm tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#</span><br>
+rm tempqrun2<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);"># </span><br>
+<br>
+<span style="color: rgb(105, 105, 105);">########################################</span><br>
+</div>
+<pre><br><br><big><big><span style="font-family: Times New Roman,Times,serif;"><br><a name="ezloop"></a>ezloop<br></span></big></big></pre>
+<div style="margin-left: 40px;"><span style="color: rgb(105, 105, 105);">#!</span><span style="color: rgb(0, 121, 151);">/usr/bin/perl</span><span style="color: rgb(187, 121, 119); font-weight: bold;"> -w</span><br>
+<span style="color: rgb(105, 105, 105);"># Shell script to
+automatically start multiple repetitive jobs.</span><br>
+<span style="color: rgb(105, 105, 105);"># Examples would be doing 100
+bootstrap replicates by sending</span><br>
+<span style="color: rgb(105, 105, 105);"># five jobs of 20 reps each or
+doing 4 mrbayes runs at once.</span><br>
+<span style="color: rgb(105, 105, 105);"># Basically, the script
+expects there to be a batch file that</span><br>
+<span style="color: rgb(105, 105, 105);"># you're using; it will
+replace any instance of REP (all caps)</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># in that batch file with the
+replicate number. To use this</span><br>
+<span style="color: rgb(105, 105, 105);"># script, you type ezloop
+followed by the number of loops, </span><br>
+<span style="color: rgb(105, 105, 105);"># then the program you want to
+run, any options, and the</span><br>
+<span style="color: rgb(105, 105, 105);"># name of the batch file. For
+example,</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># ezloop 5 paup -n
+bootbatch.nex</span><br>
+<span style="color: rgb(105, 105, 105);"># ezloop 4 mb adh.nex</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># A sample batch file for
+something like paup might be:</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># #nexus</span><br>
+<span style="color: rgb(105, 105, 105);"># begin paup;</span><br>
+<span style="color: rgb(105, 105, 105);"># log start file=bootREP.log;</span><br>
+<span style="color: rgb(105, 105, 105);"># execute primates.nex;</span><br>
+<span style="color: rgb(105, 105, 105);"># bootstrap nreps=20
+treefile=bootREP.tre brlen=yes / start=nj;</span><br>
+<span style="color: rgb(105, 105, 105);"># quit;</span><br>
+<span style="color: rgb(105, 105, 105);"># end;</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># Then, if submitted using the
+command "ezloop 5 paup -n bootbatch.nex",</span><br>
+<span style="color: rgb(105, 105, 105);"># the output would be
+boot1.log, boot1.tre, boot2.log, boot2.tre,...</span><br>
+<span style="color: rgb(105, 105, 105);"># boot5.log, boot5.tre. Each
+tree file would have trees from twenty</span><br>
+<span style="color: rgb(105, 105, 105);"># bootstrap replicates; you
+could then load them all into paup,</span><br>
+<span style="color: rgb(105, 105, 105);"># making sure to store tree
+weights, and get a majority rule</span><br>
+<span style="color: rgb(105, 105, 105);"># consensus tree using tree
+weights to compute the bootstrap tree</span><br>
+<span style="color: rgb(105, 105, 105);"># from 100 bootstrap
+replicates.</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># The one constraint is that
+you can't have pipes or redirects ( &gt;, &lt;, |), as</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># they would use the output of
+the ezloop command (which is just your job number)</span><br>
+<span style="color: rgb(105, 105, 105);"># instead of the output of
+whatever program you're calling</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># Brian O'Meara 17 Nov 2006</span><br>
+<span style="color: rgb(105, 105, 105);"># </span><span style="color: rgb(85, 85, 221);">http://www.brianomeara.info</span><br>
+<span style="color: rgb(105, 105, 105);"># Released under GPL v2 </span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">use</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">diagnostics</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">use</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">strict</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$#ARGV <span style="color: rgb(128, 128, 48);">&lt;</span> <span style="color: rgb(0, 140, 0);">2</span> <span style="color: rgb(128, 128, 48);">|</span><span style="color: rgb(128, 128, 48);">|</span> $ARGV<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 128, 48);">!</span><span style="color: rgb(128, 128, 48);">~</span><span style="color: rgb(128, 0, 0); font-weight: bold;">m</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(121, 121, 151);">\d</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">print</span> <span style="color: rgb(0, 0, 230);">"usage: ezloop #reps command [options]
+filename</span><span style="color: rgb(15, 105, 255);">\n</span><span style="color: rgb(0, 0, 230);">"</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">exit</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$outputstring<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 0, 230);">""</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$maxcmdnum<span style="color: rgb(128, 128, 48);">=</span>$#ARGV<span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">for</span> <span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(128, 0, 0); font-weight: bold;">my</span> $arg<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">1</span><span style="color: rgb(128, 0, 128);">;</span>$arg<span style="color: rgb(128, 128, 48);">&lt;</span>$maxcmdnum<span style="color: rgb(128, 0, 128);">;</span>$arg<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+$outputstring<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 0, 230);">"$outputstring "</span><span style="color: rgb(128, 128, 48);">.</span><span style="color: rgb(0, 0, 230);">"$ARGV</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 0, 230);">$arg</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(0, 0, 230);">"</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">for</span> <span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(128, 0, 0); font-weight: bold;">my</span> $rep<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">1</span><span style="color: rgb(128, 0, 128);">;</span>$rep<span style="color: rgb(128, 128, 48);">&lt;</span><span style="color: rgb(128, 128, 48);">=</span>$ARGV<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span>$rep<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$filein<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 0, 230);">"$ARGV</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 0, 230);">$#ARGV</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(0, 0, 230);">"</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(64, 0, 0);">open</span><span style="color: rgb(128, 128, 48);">(</span>IN<span style="color: rgb(128, 128, 48);">,</span><span style="color: rgb(0, 0, 230);">"$filein"</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 128, 48);">or</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">die</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(0, 0, 230);">"where is $filein ?"</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(64, 0, 0);">open</span><span style="color: rgb(128, 128, 48);">(</span>OUT<span style="color: rgb(128, 128, 48);">,</span><span style="color: rgb(0, 0, 230);">"&gt;$rep.$filein"</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">while</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(64, 1, 90);">&lt;IN&gt;</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$inline<span style="color: rgb(128, 128, 48);">=</span>$_<span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(64, 0, 0);">chomp</span> $inline<span style="color: rgb(128, 0, 128);">;</span><br>
+$inline<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(128, 128, 48);">~</span><span style="color: rgb(128, 0, 0); font-weight: bold;">s</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(0, 0, 230);">REP</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(0, 0, 230);">$rep</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 0, 0); font-weight: bold;">g</span><span style="color: rgb(128, 0, 128);">;</span> <span style="color: rgb(105, 105, 105);">#convert REP to $rep. Case sensitive</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">print</span>
+OUT <span style="color: rgb(0, 0, 230);">"$inline</span><span style="color: rgb(15, 105, 255);">\n</span><span style="color: rgb(0, 0, 230);">"</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(64, 0, 0);">close</span> IN<span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(64, 0, 0);">close</span> OUT<span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$totaloutput<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 0, 230);">"ezsub $outputstring "</span><span style="color: rgb(128, 128, 48);">.</span><span style="color: rgb(0, 0, 230);">"$rep.$filein"</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(64, 0, 0);">sleep</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(0, 140, 0);">5</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span> <span style="color: rgb(105, 105, 105);">#just to give the cluster a break,
+give us time to abort if something's wrong, etc.</span><br>
+<br>
+<span style="color: rgb(64, 0, 0);">system</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(0, 0, 230);">"$totaloutput"</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+</div>
+<pre><big><big><span style="font-family: Times New Roman,Times,serif;"><br><a name="ezdel"></a>ezdel<br></span></big></big></pre>
+<div style="margin-left: 40px;"><big><big><span style="font-family: Times New Roman,Times,serif;"><span style="font-family: monospace;"></span></span></big></big><span style="color: rgb(105, 105, 105);">#!</span><span style="color: rgb(0, 121, 151);">/usr/bin/perl</span><span style="color: rgb(187, 121, 119); font-weight: bold;"> -w</span><br>
+<span style="color: rgb(105, 105, 105);">#A quick script to delete all
+your queued and held jobs. </span><br>
+<span style="color: rgb(105, 105, 105);">#Not often useful, but handy
+when you do need it (something has gone terribly wrong)</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">use</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">diagnostics</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">use</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">strict</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$username<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 0, 230);">"bcomeara"</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">while</span> <span style="color: rgb(128, 128, 48);">(</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 0); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">qstat
+| grep "$username" | grep -c "qw"</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span> <span style="color: rgb(105, 105, 105);">#while you still have queued and/or
+held jobs</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$jobtokillline<span style="color: rgb(128, 128, 48);">=</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 0); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">qstat
+| grep "$username" | grep -m1 "qw"</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+$jobtokillline<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(128, 128, 48);">~</span><span style="color: rgb(128, 0, 0); font-weight: bold;">m</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 128, 48);">^</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(121, 121, 151);">\s</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 128, 48);">*</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(121, 121, 151);">\d</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$jobtokill<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(121, 121, 151);">$1</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(64, 0, 0);">system</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(0, 0, 230);">"qdel $jobtokill"</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(64, 0, 0);">sleep</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(0, 140, 0);">1</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+</div>
+<pre><br><big><big><span style="font-family: Times New Roman,Times,serif;"><br><a name="nicesub"></a>nicesub<br></span></big></big></pre>
+<div style="margin-left: 40px;"><span style="color: rgb(105, 105, 105);">#!
+</span><span style="color: rgb(0, 121, 151);">/bin/bash</span><br>
+<span style="color: rgb(105, 105, 105);"># Shell script to
+automatically create a simple shell script</span><br>
+<span style="color: rgb(105, 105, 105);"># and submit it to sge using
+qsub. To use this, just type</span><br>
+<span style="color: rgb(105, 105, 105);"># ezsub followed by the name
+and options for your job. I.e.,</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># nicesub paup -n batchfile.nex</span><br>
+<span style="color: rgb(105, 105, 105);"># nicesub ./configure
+--disable-shared</span><br>
+<span style="color: rgb(105, 105, 105);"># nicesub mb adh.nex</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># nicesub tar -xvf gsl-1.8.tar</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># The one constraint is that
+you can't have pipes or redirects ( &gt;, &lt;, |), as</span><br>
+<span style="color: rgb(105, 105, 105);"># they would use the output of
+the ezsub command (which is just your job number)</span><br>
+<span style="color: rgb(105, 105, 105);"># instead of the output of
+whatever program you're calling</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># Brian O'Meara 17 Nov 2006</span><br>
+<span style="color: rgb(105, 105, 105);"># </span><span style="color: rgb(85, 85, 221);">http://www.brianomeara.info</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># Released under GPL v2 </span><br>
+<br>
+echo <span style="color: rgb(0, 0, 230);">"#!/bin/bash"</span> <span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh<br>
+echo <span style="color: rgb(0, 0, 230);">"#$ -cwd"</span> <span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#use current directory as working
+directory</span><br>
+<br>
+<br>
+<span style="color: rgb(105, 105, 105);">########### Change email
+settings #################</span><br>
+echo <span style="color: rgb(0, 0, 230);">"#$ -M </span><span style="color: rgb(113, 68, 196);">me@mycollege.edu</span><span style="color: rgb(0, 0, 230);">"</span> <span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#use your own email address. Please.</span><br>
+echo <span style="color: rgb(0, 0, 230);">"#$ -m as"</span> <span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#send email about the job. </span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># "b"=when job begins</span><br>
+<span style="color: rgb(105, 105, 105);"># "e"=when job ends</span><br>
+<span style="color: rgb(105, 105, 105);"># "a"=when job aborts</span><br>
+<span style="color: rgb(105, 105, 105);"># "s"=when job suspended
+(someone kicks you off)</span><br>
+<span style="color: rgb(105, 105, 105);"># "n" alone means don't send
+mail</span><br>
+<span style="color: rgb(105, 105, 105);">##################################################</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);">##################### Job name
+############################</span><br>
+echo <span style="color: rgb(0, 0, 230);">"#$ -N niceWAIT"</span> <span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#job name</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);">###########################################################</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);">########### Don't modify this
+bit #################</span><br>
+echo <span style="color: rgb(0, 0, 230);">"#$ -r y"</span><span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#makes job rerunable #</span><br>
+echo <span style="color: rgb(0, 0, 230);">"#$ -S /bin/bash"</span><span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#</span><br>
+<br>
+echo <span style="color: rgb(0, 0, 230);">"#$ -h"</span><span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#</span><br>
+echo <span style="color: rgb(0, 0, 230);">""</span><span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span>tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">until</span> <span style="color: rgb(128, 128, 48);">[</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">-z</span> <span style="color: rgb(0, 0, 230);">"</span><span style="color: rgb(121, 121, 151);">$1</span><span style="color: rgb(0, 0, 230);">"</span> <span style="color: rgb(128, 128, 48);">]</span> <span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">do</span> <span style="color: rgb(105, 105, 105);">#</span><br>
+<br>
+echo <span style="color: rgb(128, 128, 48);">-</span>n <span style="color: rgb(0, 0, 230);">"</span><span style="color: rgb(121, 121, 151);">$1</span><span style="color: rgb(0, 0, 230);"> "</span> <span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(128, 128, 48);">&gt;</span> temporaryqrunstrings <span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(64, 0, 0);">shift</span> <span style="color: rgb(105, 105, 105);">#</span><br>
+<br>
+done <span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">tr </span><span style="color: rgb(128, 0, 0);">'</span><span style="color: rgb(15, 105, 255);">\n</span><span style="color: rgb(128, 0, 0);">'</span><span style="color: rgb(0, 0, 230);"> </span><span style="color: rgb(128, 0, 0);">'</span> <span style="color: rgb(0, 0, 230);">' &lt; temporaryqrunstrings &gt;&gt;
+tempqrun.sh #</span><br>
+<span style="color: rgb(0, 0, 230);">###################################################</span><span style="color: rgb(0, 0, 230);"></span><br>
+<br>
+<span style="color: rgb(0, 0, 230);">############ Cleanup
+#########################</span><br>
+<span style="color: rgb(0, 0, 230);">#delete the "#" at the beginning
+of the following line if you want to remove the output files</span><br>
+<span style="color: rgb(0, 0, 230);">#echo "rm EZsub.*" &gt;&gt;
+tempqrun.sh </span><br>
+<span style="color: rgb(0, 0, 230);">#############################################</span><span style="color: rgb(0, 0, 230);"></span><br>
+<span style="color: rgb(0, 0, 230);">###### Don'</span>t modify this
+bit <span style="color: rgb(105, 105, 105);">###########</span><br>
+<span style="color: rgb(64, 0, 0);">sleep</span> <span style="color: rgb(0, 140, 0);">1</span> <span style="color: rgb(105, 105, 105);">#</span><br>
+<br>
+<span style="color: rgb(64, 0, 0);">chmod</span> <span style="color: rgb(0, 140, 0);">777</span> tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#</span><br>
+cp tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh tempqrun2<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#</span><br>
+qsub tempqrun2<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#</span><br>
+<br>
+<span style="color: rgb(64, 0, 0);">sleep</span> <span style="color: rgb(0, 140, 0);">1</span> <span style="color: rgb(105, 105, 105);">#</span><br>
+rm temporaryqrunstrings <span style="color: rgb(105, 105, 105);">#</span><br>
+rm tempqrun<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);">#</span><br>
+rm tempqrun2<span style="color: rgb(128, 128, 48);">.</span>sh <span style="color: rgb(105, 105, 105);"># </span><br>
+<br>
+<span style="color: rgb(105, 105, 105);">########################################</span><br>
+</div>
+<pre><br><br><big><big><span style="font-family: Times New Roman,Times,serif;"><br><a name="niceloop"></a>niceloop<br></span></big></big></pre>
+<div style="margin-left: 40px;"><span style="color: rgb(105, 105, 105);">#!</span><span style="color: rgb(0, 121, 151);">/usr/bin/perl</span><span style="color: rgb(187, 121, 119); font-weight: bold;"> -w</span><br>
+<span style="color: rgb(105, 105, 105);"># Shell script to
+automatically start multiple repetitive jobs.</span><br>
+<span style="color: rgb(105, 105, 105);"># Examples would be doing 100
+bootstrap replicates by sending</span><br>
+<span style="color: rgb(105, 105, 105);"># five jobs of 20 reps each or
+doing 4 mrbayes runs at once.</span><br>
+<span style="color: rgb(105, 105, 105);"># Basically, the script
+expects there to be a batch file that</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># you're using; it will
+replace any instance of REP (all caps)</span><br>
+<span style="color: rgb(105, 105, 105);"># in that batch file with the
+replicate number. To use this</span><br>
+<span style="color: rgb(105, 105, 105);"># script, you type niceloop
+followed by the number of loops, </span><br>
+<span style="color: rgb(105, 105, 105);"># then the program you want to
+run, any options, and the</span><br>
+<span style="color: rgb(105, 105, 105);"># name of the batch file. For
+example,</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># niceloop 5 paup -n
+bootbatch.nex</span><br>
+<span style="color: rgb(105, 105, 105);"># niceloop 4 mb adh.nex</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># A sample batch file for
+something like paup might be:</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># #nexus</span><br>
+<span style="color: rgb(105, 105, 105);"># begin paup;</span><br>
+<span style="color: rgb(105, 105, 105);"># log start file=bootREP.log;</span><br>
+<span style="color: rgb(105, 105, 105);"># execute primates.nex;</span><br>
+<span style="color: rgb(105, 105, 105);"># bootstrap nreps=20
+treefile=bootREP.tre brlen=yes / start=nj;</span><br>
+<span style="color: rgb(105, 105, 105);"># quit;</span><br>
+<span style="color: rgb(105, 105, 105);"># end;</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># Then, if submitted using the
+command "niceloop 5 paup -n bootbatch.nex",</span><br>
+<span style="color: rgb(105, 105, 105);"># the output would be
+boot1.log, boot1.tre, boot2.log, boot2.tre,...</span><br>
+<span style="color: rgb(105, 105, 105);"># boot5.log, boot5.tre. Each
+tree file would have trees from twenty</span><br>
+<span style="color: rgb(105, 105, 105);"># bootstrap replicates; you
+could then load them all into paup,</span><br>
+<span style="color: rgb(105, 105, 105);"># making sure to store tree
+weights, and get a majority rule</span><br>
+<span style="color: rgb(105, 105, 105);"># consensus tree using tree
+weights to compute the bootstrap tree</span><br>
+<span style="color: rgb(105, 105, 105);"># from 100 bootstrap
+replicates.</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># The one constraint is that
+you can't have pipes or redirects ( &gt;, &lt;, |), as</span><br>
+<span style="color: rgb(105, 105, 105);"># they would use the output of
+the niceloop command (which is just your job number)</span><br>
+<span style="color: rgb(105, 105, 105);"># instead of the output of
+whatever program you're calling</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># Brian O'Meara 17 Nov 2006</span><br>
+<span style="color: rgb(105, 105, 105);"># </span><span style="color: rgb(85, 85, 221);">http://www.brianomeara.info</span><br>
+<span style="color: rgb(105, 105, 105);"># Released under GPL v2 </span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">use</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">diagnostics</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">use</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">strict</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$#ARGV <span style="color: rgb(128, 128, 48);">&lt;</span> <span style="color: rgb(0, 140, 0);">2</span> <span style="color: rgb(128, 128, 48);">|</span><span style="color: rgb(128, 128, 48);">|</span> $ARGV<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 128, 48);">!</span><span style="color: rgb(128, 128, 48);">~</span><span style="color: rgb(128, 0, 0); font-weight: bold;">m</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(121, 121, 151);">\d</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">print</span> <span style="color: rgb(0, 0, 230);">"usage: ezloop #reps command [options]
+filename</span><span style="color: rgb(15, 105, 255);">\n</span><span style="color: rgb(0, 0, 230);">"</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">exit</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$outputstring<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 0, 230);">""</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$maxcmdnum<span style="color: rgb(128, 128, 48);">=</span>$#ARGV<span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">for</span> <span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(128, 0, 0); font-weight: bold;">my</span> $arg<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">1</span><span style="color: rgb(128, 0, 128);">;</span>$arg<span style="color: rgb(128, 128, 48);">&lt;</span>$maxcmdnum<span style="color: rgb(128, 0, 128);">;</span>$arg<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+$outputstring<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 0, 230);">"$outputstring "</span><span style="color: rgb(128, 128, 48);">.</span><span style="color: rgb(0, 0, 230);">"$ARGV</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 0, 230);">$arg</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(0, 0, 230);">"</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">for</span> <span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(128, 0, 0); font-weight: bold;">my</span> $rep<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">1</span><span style="color: rgb(128, 0, 128);">;</span>$rep<span style="color: rgb(128, 128, 48);">&lt;</span><span style="color: rgb(128, 128, 48);">=</span>$ARGV<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span>$rep<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$filein<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 0, 230);">"$ARGV</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 0, 230);">$#ARGV</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(0, 0, 230);">"</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(64, 0, 0);">open</span><span style="color: rgb(128, 128, 48);">(</span>IN<span style="color: rgb(128, 128, 48);">,</span><span style="color: rgb(0, 0, 230);">"$filein"</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 128, 48);">or</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">die</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(0, 0, 230);">"where is $filein ?"</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(64, 0, 0);">open</span><span style="color: rgb(128, 128, 48);">(</span>OUT<span style="color: rgb(128, 128, 48);">,</span><span style="color: rgb(0, 0, 230);">"&gt;$rep.$filein"</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">while</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(64, 1, 90);">&lt;IN&gt;</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$inline<span style="color: rgb(128, 128, 48);">=</span>$_<span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(64, 0, 0);">chomp</span> $inline<span style="color: rgb(128, 0, 128);">;</span><br>
+$inline<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(128, 128, 48);">~</span><span style="color: rgb(128, 0, 0); font-weight: bold;">s</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(0, 0, 230);">REP</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(0, 0, 230);">$rep</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 0, 0); font-weight: bold;">g</span><span style="color: rgb(128, 0, 128);">;</span> <span style="color: rgb(105, 105, 105);">#convert REP to $rep. Case sensitive</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">print</span>
+OUT <span style="color: rgb(0, 0, 230);">"$inline</span><span style="color: rgb(15, 105, 255);">\n</span><span style="color: rgb(0, 0, 230);">"</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(64, 0, 0);">close</span> IN<span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(64, 0, 0);">close</span> OUT<span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$totaloutput<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 0, 230);">"nicesub $outputstring "</span><span style="color: rgb(128, 128, 48);">.</span><span style="color: rgb(0, 0, 230);">"$rep.$filein"</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(64, 0, 0);">sleep</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(64, 0, 0);">rand</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(0, 140, 0);">4</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span> <span style="color: rgb(105, 105, 105);">#just to give the cluster a break,
+give us time to abort if something's wrong, etc.</span><br>
+<br>
+<span style="color: rgb(64, 0, 0);">system</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(0, 0, 230);">"$totaloutput"</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+</div>
+<pre><big><big><span style="font-family: Times New Roman,Times,serif;"><br><a name="nicestart"></a>nicestart<br></span></big></big></pre>
+<div style="margin-left: 40px;"><span style="color: rgb(105, 105, 105);">#!</span><span style="color: rgb(0, 121, 151);">/usr/bin/perl</span><span style="color: rgb(187, 121, 119); font-weight: bold;"> -w</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># nicestart: start submitting
+your nicely-submitted jobs to SGE. It takes three numbers as arguments.</span><br>
+<span style="color: rgb(105, 105, 105);"># MinNum: You will have at
+least MinNum jobs running or in the official queue at a time,</span><br>
+<span style="color: rgb(105, 105, 105);"># even if this leaves no nodes
+free for other users</span><br>
+<span style="color: rgb(105, 105, 105);"># MaxNum: You will have no
+more than MaxNum jobs running or in the official queue at a time,</span><br>
+<span style="color: rgb(105, 105, 105);"># even there are oodles of
+other nodes free.</span><br>
+<span style="color: rgb(105, 105, 105);"># FreeNum: The number of nodes
+you will leave free for other users.</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># usage: nicestart
+&lt;MinNum&gt; &lt;MaxNum&gt; &lt;FreeNum&gt;</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># example: nicestart 2 30 40</span><br>
+<span style="color: rgb(105, 105, 105);"># will keep between 2 and 30
+of your jobs running or actively queued, while keeping at least</span><br>
+<span style="color: rgb(105, 105, 105);"># 40 nodes unused, regardless
+of how many other people are using the cluster</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># Niceloop and nicesub
+effectively put jobs in your own queue. Nicestart starts a script that
+moves jobs</span><br>
+<span style="color: rgb(105, 105, 105);"># from your own queue into the
+general queue. You submit jobs until there are only FreeNum nodes
+available</span><br>
+<span style="color: rgb(105, 105, 105);"># (but you keep at least
+MinNum jobs in the general queue). The general idea is that if the
+cluster isn't</span><br>
+<span style="color: rgb(105, 105, 105);"># being heavily used, you
+submit many jobs, but if the cluster is getting fuller, you submit jobs
+at a slower</span><br>
+<span style="color: rgb(105, 105, 105);"># rate to make sure to leave
+nodes available for other users. This is most useful for cases where
+you have</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># many jobs (&gt;50) to submit
+but don't want to block cluster use. It can be especially appropriate
+if the</span><br>
+<span style="color: rgb(105, 105, 105);"># jobs complete very quickly,
+so your number of active jobs can change very quickly as cluster use
+changes.</span><br>
+<span style="color: rgb(105, 105, 105);"># Setting MinNum&gt;0 means
+that you will always have MinNum jobs submitted or running, even if
+this means that</span><br>
+<span style="color: rgb(105, 105, 105);"># fewer than FreeNum nodes are
+left available.</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># If you want to change your
+limits, just run nicestart again with the new limits.</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># Jobs that are held in your
+own separate queue will have state "hqw" and job name "niceWAIT" -- when</span><br>
+<span style="color: rgb(105, 105, 105);"># they are submitted to the
+general queue, their state will be "qw" or "r" and their name changed to</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># "niceRUN".</span><br>
+<span style="color: rgb(105, 105, 105);">#</span><br>
+<span style="color: rgb(105, 105, 105);"># Brian O'Meara</span><br>
+<span style="color: rgb(105, 105, 105);"># </span><span style="color: rgb(85, 85, 221);">http://www.brianomeara.info</span><br>
+<span style="color: rgb(105, 105, 105);"># Nov. 16, 2006</span><br>
+<span style="color: rgb(105, 105, 105);"># Released under GNU Public
+License V. 2</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">use</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">diagnostics</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">use</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">strict</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$username<span style="color: rgb(128, 128, 48);">=</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 0); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">whoami</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(64, 0, 0);">chomp</span> $username<span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$nicewatchcount<span style="color: rgb(128, 128, 48);">=</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 0); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">top
+-b -n1 | grep $username | grep -c nicewatch</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$nicewatchcount<span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+@nicewatchlist<span style="color: rgb(128, 128, 48);">=</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 0); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">top
+-b -n1 | grep $username | grep nicewatch</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">foreach</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">my</span> $job <span style="color: rgb(128, 128, 48);">(</span>@nicewatchlist<span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+$job<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(128, 128, 48);">~</span><span style="color: rgb(128, 0, 0); font-weight: bold;">m</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 128, 48);">^</span><span style="color: rgb(121, 121, 151);">\s</span><span style="color: rgb(128, 128, 48);">*</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(121, 121, 151);">\d</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(121, 121, 151);">\s</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span> $pid<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(121, 121, 151);">$1</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(64, 0, 0);">system</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(0, 0, 230);">"kill $pid"</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(64, 0, 0);">system</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(0, 0, 230);">"nohup nicewatch $ARGV</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(0, 0, 230);"> $ARGV</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">1</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(0, 0, 230);"> $ARGV</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">2</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(0, 0, 230);"> &gt; /dev/null &amp;"</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+</div>
+<pre><big><big><span style="font-family: Times New Roman,Times,serif;"><a name="nicewatch"></a>nicewatch<br></span></big></big></pre>
+<div style="margin-left: 40px;"><span style="color: rgb(105, 105, 105);">#!</span><span style="color: rgb(0, 121, 151);">/usr/bin/perl</span><span style="color: rgb(187, 121, 119); font-weight: bold;"> -w</span><br>
+<span style="color: rgb(105, 105, 105);">#takes settings
+minnum_active_queued_or_running, maxnum_active_queued_or_running (both
+for individual user), number of slots to leave free</span><br>
+<span style="color: rgb(105, 105, 105);"># Brian O'Meara</span><br>
+<span style="color: rgb(105, 105, 105);"># </span><span style="color: rgb(85, 85, 221);">http://www.brianomeara.info</span><br>
+<span style="color: rgb(105, 105, 105);"># Nov. 27, 2006</span><br>
+<span style="color: rgb(105, 105, 105);"># Released under GNU Public
+License V. 2</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">use</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">diagnostics</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">use</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">strict</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(64, 0, 0);">sleep</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(0, 140, 0);">3</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$username<span style="color: rgb(128, 128, 48);">=</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 0); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">whoami</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(64, 0, 0);">chomp</span> $username<span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$minnumqueuedtorun<span style="color: rgb(128, 128, 48);">=</span>$ARGV<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$maxnumqueuedtorun<span style="color: rgb(128, 128, 48);">=</span>$ARGV<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">1</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$freeslots<span style="color: rgb(128, 128, 48);">=</span>$ARGV<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">2</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">while</span> <span style="color: rgb(128, 128, 48);">(</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 0); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">qstat
+| grep "$username" | grep -c "hqw"</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="color: rgb(128, 128, 48);">&gt;</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span> <span style="color: rgb(105, 105, 105);">#while there are still queued, held
+jobs</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+@ezcountarray<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(128, 0, 0); font-weight: bold;">split</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(0, 0, 230);"> </span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 128, 48);">,</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 0); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">nicecount</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countall<span style="color: rgb(128, 128, 48);">=</span>$ezcountarray<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countRme<span style="color: rgb(128, 128, 48);">=</span>$ezcountarray<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">6</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countRall<span style="color: rgb(128, 128, 48);">=</span>$ezcountarray<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">1</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countQWme<span style="color: rgb(128, 128, 48);">=</span>$ezcountarray<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">7</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countQWall<span style="color: rgb(128, 128, 48);">=</span>$ezcountarray<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">2</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countHme<span style="color: rgb(128, 128, 48);">=</span>$ezcountarray<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">8</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countHall<span style="color: rgb(128, 128, 48);">=</span>$ezcountarray<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">3</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countSall<span style="color: rgb(128, 128, 48);">=</span>$ezcountarray<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">4</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countSme<span style="color: rgb(128, 128, 48);">=</span>$ezcountarray<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">9</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countEall<span style="color: rgb(128, 128, 48);">=</span>$ezcountarray<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">5</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countEme<span style="color: rgb(128, 128, 48);">=</span>$ezcountarray<span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(0, 140, 0);">10</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$reactivate<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(128, 128, 48);">(</span>$countRme<span style="color: rgb(128, 128, 48);">+</span>$countQWme<span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 128, 48);">&lt;</span>$minnumqueuedtorun<span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+$reactivate<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">1</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(0, 140, 0);">88</span><span style="color: rgb(128, 128, 48);">-</span><span style="color: rgb(128, 128, 48);">(</span>$countQWall<span style="color: rgb(128, 128, 48);">+</span>$countRall<span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 128, 48);">&gt;</span>$freeslots<span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(128, 128, 48);">(</span>$countRme<span style="color: rgb(128, 128, 48);">+</span>$countQWme<span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 128, 48);">&lt;</span>$maxnumqueuedtorun <span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+$reactivate<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">1</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$reactivate<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">1</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$jobtostartline<span style="color: rgb(128, 128, 48);">=</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 0); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">qstat
+| grep "$username" | grep -m1 "hqw"</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="color: rgb(128, 0, 128);">;</span><br>
+$jobtostartline<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(128, 128, 48);">~</span><span style="color: rgb(128, 0, 0); font-weight: bold;">m</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 128, 48);">^</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(121, 121, 151);">\s</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 128, 48);">*</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(121, 121, 151);">\d</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$jobtostart<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(121, 121, 151);">$1</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(64, 0, 0);">system</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(0, 0, 230);">"qalter -h U -N niceRUN $jobtostart"</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<br>
+<span style="color: rgb(64, 0, 0);">sleep</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(64, 0, 0);">rand</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(0, 140, 0);">10</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 128);">;</span> <span style="color: rgb(105, 105, 105);">#Don't change this. This tells the
+script how long to wait before</span><br>
+<span style="color: rgb(105, 105, 105);"># reactivating. If you get rid
+of this line, the script will</span><br>
+<span style="color: rgb(105, 105, 105);"># keep rerunning, taking up
+far too much time on the head node.</span><br>
+<br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+</div>
+<pre><big><big><span style="font-family: Times New Roman,Times,serif;"><br><a name="niceqstat"></a>niceqstat<br></span></big></big></pre>
+<div style="margin-left: 40px;"><span style="color: rgb(105, 105, 105);">#!</span><span style="color: rgb(0, 121, 151);">/bin/bash</span><br>
+<span style="color: rgb(105, 105, 105);">#This just returns qstat's
+normal output, omitting jobs held in individual user queues</span><br>
+<span style="color: rgb(105, 105, 105);"># Brian O'Meara</span><br>
+<span style="color: rgb(105, 105, 105);"># </span><span style="color: rgb(85, 85, 221);">http://www.brianomeara.info</span><br>
+<br>
+<span style="color: rgb(105, 105, 105);"># Nov. 16, 2006</span><br>
+<span style="color: rgb(105, 105, 105);"># Released under GNU Public
+Licence v 2 </span><br>
+qstat <span style="color: rgb(128, 128, 48);">|</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">grep</span> <span style="color: rgb(128, 128, 48);">-</span>v <span style="color: rgb(0, 0, 230);">"hqw"</span><br>
+</div>
+<pre><big><big><span style="font-family: Times New Roman,Times,serif;"><br><a name="nicecount"></a>nicecount<br></span></big></big></pre>
+<div style="margin-left: 40px;"><span style="color: rgb(105, 105, 105);">#!</span><span style="color: rgb(0, 121, 151);">/usr/bin/perl</span><span style="color: rgb(187, 121, 119); font-weight: bold;"> -w</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">use</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">diagnostics</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">use</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">strict</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+@qstatin<span style="color: rgb(128, 128, 48);">=</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 0); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">qstat</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$username<span style="color: rgb(128, 128, 48);">=</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 0); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">whoami</span><span style="background-color: rgb(255, 255, 232); background-image: none; background-repeat: repeat; background-attachment: scroll; background-position: 0% 50%; -moz-background-size: auto auto; color: rgb(0, 0, 230); -moz-background-clip: -moz-initial; -moz-background-origin: -moz-initial; -moz-background-inline-policy: -moz-initial;">`</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(64, 0, 0);">chomp</span> $username<span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countall<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countRme<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countRall<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countQWme<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countQWall<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countHme<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countHall<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countSall<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countSme<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countEall<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$countEme<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(0, 140, 0);">0</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">foreach</span> <span style="color: rgb(128, 0, 0); font-weight: bold;">my</span> $qstatline
+<span style="color: rgb(128, 128, 48);">(</span>@qstatin<span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<span style="color: rgb(64, 0, 0);">chomp</span> $qstatline<span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$qstatline<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(128, 128, 48);">~</span><span style="color: rgb(128, 0, 0); font-weight: bold;">m</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(121, 121, 151);">\s</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(121, 121, 151);">\d</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(121, 121, 151);">\s</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(121, 121, 151);">\d</span><span style="color: rgb(15, 105, 255);">\.</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(121, 121, 151);">\s</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(121, 121, 151);">\S</span><span style="color: rgb(121, 121, 151);">\d</span><span style="color: rgb(15, 105, 255);">\.</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(121, 121, 151);">\s</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(121, 121, 151);">\S</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(121, 121, 151);">\s</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(121, 121, 151);">\S</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(121, 121, 151);">\s</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(121, 121, 151);">\d</span><span style="color: rgb(15, 105, 255);">\/</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(121, 121, 151);">\s</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(128, 128, 48);">[</span><span style="color: rgb(121, 121, 151);">\d</span><span style="color: rgb(15, 105, 255);">\:</span><span style="color: rgb(128, 128, 48);">]</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(121, 121, 151);">\s</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(121, 121, 151);">\S</span><span style="color: rgb(128, 128, 48);">*</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(121, 121, 151);">\s</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">(</span><span style="color: rgb(121, 121, 151);">\d</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">)</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 0, 0); font-weight: bold;">i</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span> $jobid<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(121, 121, 151);">$1</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span> $prior<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(121, 121, 151);">$2</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$jobname<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(121, 121, 151);">$3</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span> $user<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(121, 121, 151);">$4</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span> $state<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(121, 121, 151);">$5</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$subdate<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(121, 121, 151);">$6</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span>
+$subtime<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(121, 121, 151);">$7</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span> $queue<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(121, 121, 151);">$8</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">my</span> $slots<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(121, 121, 151);">$9</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<br>
+$countall<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$state<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(128, 128, 48);">~</span><span style="color: rgb(128, 0, 0); font-weight: bold;">m</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(0, 0, 230);">r</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 0, 0); font-weight: bold;">i</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+$countRall<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$user <span style="color: rgb(128, 128, 48);">eq</span> $username<span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+$countRme<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$state<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(128, 128, 48);">~</span><span style="color: rgb(128, 0, 0); font-weight: bold;">m</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 128, 48);">^</span><span style="color: rgb(0, 0, 230);">qw</span><span style="color: rgb(128, 128, 48);">$</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 0, 0); font-weight: bold;">i</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+$countQWall<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$user <span style="color: rgb(128, 128, 48);">eq</span> $username<span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+$countQWme<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$state<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(128, 128, 48);">~</span><span style="color: rgb(128, 0, 0); font-weight: bold;">m</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(0, 0, 230);">h</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 0, 0); font-weight: bold;">i</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+$countHall<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$user <span style="color: rgb(128, 128, 48);">eq</span> $username<span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+$countHme<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$state<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(128, 128, 48);">~</span><span style="color: rgb(128, 0, 0); font-weight: bold;">m</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(0, 0, 230);">s</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 0, 0); font-weight: bold;">i</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+$countSall<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$user <span style="color: rgb(128, 128, 48);">eq</span> $username<span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+$countSme<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$state<span style="color: rgb(128, 128, 48);">=</span><span style="color: rgb(128, 128, 48);">~</span><span style="color: rgb(128, 0, 0); font-weight: bold;">m</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(0, 0, 230);">e</span><span style="color: rgb(128, 0, 0);">/</span><span style="color: rgb(128, 0, 0); font-weight: bold;">i</span><span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+$countEall<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">if</span> <span style="color: rgb(128, 128, 48);">(</span>$user <span style="color: rgb(128, 128, 48);">eq</span> $username<span style="color: rgb(128, 128, 48);">)</span> <span style="color: rgb(128, 0, 128);">{</span><br>
+<br>
+$countEme<span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 128, 48);">+</span><span style="color: rgb(128, 0, 128);">;</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<span style="color: rgb(128, 0, 128);">}</span><br>
+<br>
+<span style="color: rgb(128, 0, 0); font-weight: bold;">print</span> <span style="color: rgb(0, 0, 230);">"$countall $countRall $countQWall
+$countHall $countSall $countEall $countRme $countQWme $countHme
+$countSme $countEme"</span><span style="color: rgb(128, 0, 128);">;</span><br>
+</div>
+<!-- ***** BEGIN LICENSE BLOCK *****
+   - Version: MPL 1.1/GPL 2.0/LGPL 2.1
+   -
+   - The contents of this file are subject to the Mozilla Public License Version
+   - 1.1 (the "License"); you may not use this file except in compliance with
+   - the License. You may obtain a copy of the License at
+   - http://www.mozilla.org/MPL/
+   -
+   - Software distributed under the License is distributed on an "AS IS" basis,
+   - WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+   - for the specific language governing rights and limitations under the
+   - License.
+   -
+   - The Original Code is the Colorer Library.
+   -
+   - The Initial Developer of the Original Code is
+   - Cail Lomecb <cail@nm.ru>.
+   - Portions created by the Initial Developer are Copyright (C) 1999-2005
+   - the Initial Developer. All Rights Reserved.
+   -
+   - Contributor(s):
+   -
+   - Alternatively, the contents of this file may be used under the terms of
+   - either the GNU General Public License Version 2 or later (the "GPL"), or
+   - the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+   - in which case the provisions of the GPL or the LGPL are applicable instead
+   - of those above. If you wish to allow use of your version of this file only
+   - under the terms of either the GPL or the LGPL, and not to allow others to
+   - use your version of this file under the terms of the MPL, indicate your
+   - decision by deleting the provisions above and replace them with the notice
+   - and other provisions required by the LGPL or the GPL. If you do not delete
+   - the provisions above, a recipient may use your version of this file under
+   - the terms of any one of the MPL, the GPL or the LGPL.
+   -
+   - ***** END LICENSE BLOCK ***** -->
+</body></html>
